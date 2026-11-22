@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ماسح QR - الحضور فقط</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    body { font-family: Tahoma, Arial, sans-serif; background: #f3f5f7; padding: 15px; }
+    main { max-width: 500px; margin: auto; background: white; padding: 20px; border-radius: 15px; }
+    input, select, button { box-sizing: border-box; width: 100%; padding: 13px; margin: 8px 0; font-size: 16px; }
+    button { background: #1458a6; color: white; border: 0; border-radius: 8px; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    #reader { margin-top: 15px; }
+    #status { line-height: 1.8; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+<main>
+  <h2>مسح QR وتسجيل الحضور فقط</h2>
+  <input id="pin" type="password" placeholder="أدخل رمز التحقق" autocomplete="off">
+  <button id="startButton" type="button" onclick="startScanner()">تشغيل الكاميرا</button>
+  <div id="reader"></div>
+  <p id="status" role="status" aria-live="polite">جاهز للمسح</p>
+
+  <form id="sendForm" method="POST" target="responseFrame" hidden>
+    <input type="hidden" name="payload" id="payload">
+  </form>
+  <iframe name="responseFrame" id="responseFrame" hidden title="استجابة تسجيل المسح"></iframe>
+</main>
+
+<script>
+  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx9RrZCbJMZGcwuS8GXQqc4xU4VP8x_fDL2GtSjXzUmVacuf9ktSfHIp0P0AxEypEDY8Q/exec";  
+  let scanner;
+  let busy = false;
+  let starting = false;
+
+  function statusText(text) {
+    document.getElementById("status").textContent = text;
+  }
+
+  async function startScanner() {
+    if (starting || busy) return;
+
+    const pin = document.getElementById("pin").value.trim();
+    if (!pin) {
+      statusText("أدخل رمز التحقق أولًا");
+      return;
+    }
+
+    starting = true;
+    document.getElementById("startButton").disabled = true;
+    try {
+      if (scanner) {
+        try { await scanner.stop(); } catch (e) {}
+        try { scanner.clear(); } catch (e) {}
+      }
+
+      scanner = new Html5Qrcode("reader");
+      busy = false;
+
+      await scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        onScan
+      );
+
+      statusText("الكاميرا تعمل، وجّهها إلى QR لتسجيل الحضور");
+    } catch (err) {
+      statusText("خطأ في تشغيل الكاميرا: " + (err.message || err));
+    } finally {
+      starting = false;
+      document.getElementById("startButton").disabled = false;
+    }
+  }
+
+  async function onScan(text) {
+    if (busy) return;
+    busy = true;
+
+    try {
+      const person = JSON.parse(text);
+      if (!person || !person.id || !person.name || !person.job) {
+        throw new Error("بيانات QR غير مكتملة");
+      }
+
+      const pin = document.getElementById("pin").value.trim();
+      if (!pin) throw new Error("رمز التحقق غير موجود");
+      if (!WEB_APP_URL) throw new Error("لم يتم إعداد رابط تطبيق الحضور الجديد بعد");
+
+      const form = document.getElementById("sendForm");
+      form.action = WEB_APP_URL;
+      document.getElementById("payload").value = JSON.stringify({
+        pin: pin,
+        person: person,
+        type: "attendance"
+      });
+
+      await scanner.stop();
+      form.submit();
+
+      statusText(
+        "تم إرسال طلب التسجيل (بانتظار التحقق من الحفظ):\n" +
+        "الاسم: " + person.name + "\n" +
+        "الوظيفة: " + person.job + "\n" +
+        "نوع العملية: حضور\n" +
+        "تحقق من Google Sheets للتأكد من نجاح الحفظ."
+      );
+    } catch (err) {
+      statusText("خطأ: " + (err.message || err));
+      busy = false;
+    }
+  }
+</script>
+</body>
+</html>
